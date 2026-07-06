@@ -12,9 +12,18 @@ configure_package_config_file(
 )
 
 execute_process(
-  COMMAND ${CMAKE_COMMAND} -S${CMAKE_CURRENT_LIST_DIR}/local_dependency -B${TEST_BUILD_DIR}
-          -DCPM_Dependency_SOURCE=${CMAKE_CURRENT_LIST_DIR}/local_dependency/dependency
+  COMMAND ${CMAKE_COMMAND} "-S${CMAKE_CURRENT_LIST_DIR}/local_dependency" "-B${TEST_BUILD_DIR}"
+          "-DCPM_Dependency_SOURCE=${CMAKE_CURRENT_LIST_DIR}/local_dependency/dependency"
   RESULT_VARIABLE ret
+  ERROR_VARIABLE cmake_stderr
 )
 
 assert_equal(${ret} "0")
+
+if(NOT "${cmake_stderr}" MATCHES "CPM:.*Dependency.*overridden by CMake variable")
+  message(
+    FATAL_ERROR "Expected CPM CMake variable override warning not found in output:\n${cmake_stderr}"
+  )
+else()
+  message(STATUS "test passed: CPM CMake variable override warning was emitted")
+endif()

@@ -768,10 +768,23 @@ function(CPMAddPackage)
     return()
   endif()
 
+  if(NOT DEFINED CPM_${CPM_ARGS_NAME}_SOURCE AND DEFINED ENV{CPM_${CPM_ARGS_NAME}_SOURCE})
+    # Normalize separators to support Windows paths when reading from environment variables.
+    file(TO_CMAKE_PATH "$ENV{CPM_${CPM_ARGS_NAME}_SOURCE}" CPM_${CPM_ARGS_NAME}_SOURCE)
+    message(WARNING "${CPM_INDENT} '${CPM_ARGS_NAME}' version overridden by environment variable "
+                    "CPM_${CPM_ARGS_NAME}_SOURCE='${CPM_${CPM_ARGS_NAME}_SOURCE}'"
+    )
+  endif()
+
   # Check for manual overrides
   if(NOT CPM_ARGS_FORCE AND NOT "${CPM_${CPM_ARGS_NAME}_SOURCE}" STREQUAL "")
     set(PACKAGE_SOURCE ${CPM_${CPM_ARGS_NAME}_SOURCE})
     set(CPM_${CPM_ARGS_NAME}_SOURCE "")
+    if(NOT DEFINED ENV{CPM_${CPM_ARGS_NAME}_SOURCE})
+      message(WARNING "${CPM_INDENT} '${CPM_ARGS_NAME}' version overridden by CMake variable "
+                      "CPM_${CPM_ARGS_NAME}_SOURCE='${PACKAGE_SOURCE}'"
+      )
+    endif()
     CPMAddPackage(
       NAME "${CPM_ARGS_NAME}"
       SOURCE_DIR "${PACKAGE_SOURCE}"
