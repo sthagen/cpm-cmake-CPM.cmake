@@ -1,29 +1,96 @@
 name: Publish
 
 on:
-  push:
-    tags:
-      - '*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (e.g. v42.0.0)
+        required: true
+
+permissions:
+  contents: write
 
 jobs:
-  build:
-    name: Publish CPM.cmake
+  publish:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout repository
+        uses: actions/checkout@v6
 
-      - name: Set CPM version by tag
+      - name: Validate publish request
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          mkdir dist
-          sed -e "s/1.0.0-development-version/${GITHUB_REF/refs\/tags\/v}/g" cmake/CPM.cmake > dist/CPM.cmake
-          sed -e "s/1.0.0-development-version/${GITHUB_REF/refs\/tags\/v}/g" \
-              -e "s/CPM_HASH_SUM_PLACEHOLDER/$(sha256sum dist/CPM.cmake | cut -d' ' -f1)/" cmake/get_cpm.cmake > dist/get_cpm.cmake
+          set -euo pipefail
 
-      - name: Upload CPM.cmake to release
-        uses: svenstaro/upload-release-action@29e53e917877a24fad85510ded594ab3c9ca12de # 2.11.5
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.ref }}
-          file: dist/*.cmake
-          file_glob: true
-          overwrite: true
+          # validate dispatch branch
+          if [[ "${GITHUB_REF}" != "refs/heads/master" ]]; then
+            echo "Error: publish workflow must be dispatched from 'master'. Current ref: ${GITHUB_REF}" >&2
+            exit 1
+          fi
+
+          # validate tag input
+          if [[ -z "$TAG" ]]; then
+            echo "Error: tag input is empty" >&2
+            exit 1
+          fi
+          
+          # validate tag format (SemVer with leading "v")
+          if ! [[ "$TAG" =~ ^v[0-9]+(\.[0-9]+){2}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Error: tag must be a SemVer starting with 'v' (e.g., v42.0.0, v42.0.0-rc.1, or v42.0.0-rc.1+build.1)" >&2
+            exit 1
+          fi
+          
+          git fetch --tags
+
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            if [[ "$(git rev-parse "$TAG^{commit}")" != "$(git rev-parse HEAD)" ]]; then
+              echo "Error: tag '$TAG' already exists and points to a different commit." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Create tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "Tag '$TAG' already exists; reusing it." >&2
+          else
+            git tag "$TAG"
+          fi
+
+      - name: Build CPM.cmake
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir dist
+          VERSION="${TAG#v}"
+
+          sed \
+            -e "s/1.0.0-development-version/${VERSION}/g" \
+            cmake/CPM.cmake > dist/CPM.cmake
+
+          sed \
+            -e "s/1.0.0-development-version/${VERSION}/g" \
+            -e "s/CPM_HASH_SUM_PLACEHOLDER/$(sha256sum dist/CPM.cmake | cut -d' ' -f1)/" \
+            cmake/get_cpm.cmake > dist/get_cpm.cmake
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GH_TAG" >/dev/null 2>&1; then
+            echo "Error: GitHub release '$GH_TAG' already exists. Because releases/assets are immutable, choose a new tag or delete the existing release before re-running." >&2
+            exit 1
+          fi
+          git push origin "refs/tags/$GH_TAG"
+          gh release create "$GH_TAG" \
+            dist/*.cmake \
+            --title "$GH_TAG" \
+            --generate-notes
